@@ -1,0 +1,70 @@
+# On every push to master: build the hub, publish a GitHub Release with the built site attached,
+# and deploy it to GitHub Pages. Can also be run by hand from the Actions tab.
+# One-time setup in the repository: Settings → Pages → Build and deployment → Source: GitHub Actions.
+name: Release and deploy
+
+on:
+    push:
+        branches: [master]
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: release-deploy
+    cancel-in-progress: false
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 24
+                  cache: npm
+            - run: npm ci
+            - run: npm run build
+            - name: Package the built site
+              run: cd dist && zip -qr ../smyli-hub-site.zip .
+            - uses: actions/upload-artifact@v4
+              with:
+                  name: site-zip
+                  path: smyli-hub-site.zip
+            - uses: actions/upload-pages-artifact@v3
+              with:
+                  path: dist
+
+    release:
+        needs: build
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+        steps:
+            - uses: actions/download-artifact@v4
+              with:
+                  name: site-zip
+            - name: Create GitHub Release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  TAG: v1.0.${{ github.run_number }}
+              run: |
+                  gh release create "$TAG" smyli-hub-site.zip \
+                      --repo "$GITHUB_REPOSITORY" \
+                      --target "$GITHUB_SHA" \
+                      --title "$TAG" \
+                      --generate-notes
+
+    deploy:
+        needs: build
+        runs-on: ubuntu-latest
+        permissions:
+            pages: write
+            id-token: write
+        environment:
+            name: github-pages
+            url: ${{ steps.deployment.outputs.page_url }}
+        steps:
+            - id: deployment
+              uses: actions/deploy-pages@v4
